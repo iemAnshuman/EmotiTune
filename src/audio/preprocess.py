@@ -34,21 +34,12 @@ crema_emotions = {
 }
 
 # Utility functions
-def extract_mfcc(file_path, n_mfcc=40, max_pad_len=174):
-    try:
-        audio, sample_rate = librosa.load(file_path, res_type='kaiser_fast')
-        mfcc = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=n_mfcc)
-        
-        if mfcc.shape[1] < max_pad_len:
-            pad_width = max_pad_len - mfcc.shape[1]
-            mfcc = np.pad(mfcc, pad_width=((0, 0), (0, pad_width)), mode='constant')
-        else:
-            mfcc = mfcc[:, :max_pad_len]
-        
-        return mfcc
-    except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        return None
+def _pad_or_trim(feature, max_pad_len=174):
+    if feature.shape[1] < max_pad_len:
+        pad_width = max_pad_len - feature.shape[1]
+        return np.pad(feature, ((0,0),(0,pad_width)), mode='constant')
+    else:
+        return feature[:, :max_pad_len]
 
 def extract_audio_features(file_path, n_mfcc=40, max_pad_len=174):
     try:
@@ -64,17 +55,10 @@ def extract_audio_features(file_path, n_mfcc=40, max_pad_len=174):
         tonnetz_feat = tonnetz(y=harmonic(y), sr=sr)
 
         # Pad all to same time axis (second dimension)
-        def pad_or_trim(feature):
-            if feature.shape[1] < max_pad_len:
-                pad_width = max_pad_len - feature.shape[1]
-                return np.pad(feature, ((0,0),(0,pad_width)), mode='constant')
-            else:
-                return feature[:, :max_pad_len]
-
-        mfcc_feat = pad_or_trim(mfcc_feat)
-        chroma_feat = pad_or_trim(chroma_feat)
-        contrast_feat = pad_or_trim(contrast_feat)
-        tonnetz_feat = pad_or_trim(tonnetz_feat)
+        mfcc_feat = _pad_or_trim(mfcc_feat, max_pad_len)
+        chroma_feat = _pad_or_trim(chroma_feat, max_pad_len)
+        contrast_feat = _pad_or_trim(contrast_feat, max_pad_len)
+        tonnetz_feat = _pad_or_trim(tonnetz_feat, max_pad_len)
 
         # Stack all features vertically
         full_feature = np.vstack([mfcc_feat, chroma_feat, contrast_feat, tonnetz_feat])
@@ -102,9 +86,9 @@ def load_ravdess(path):
             if file.endswith('.wav'):
                 label = parse_ravdess_filename(file)
                 if label:
-                    mfcc = extract_audio_features(os.path.join(root, file))
-                    if mfcc is not None:
-                        X.append(mfcc)
+                    features = extract_audio_features(os.path.join(root, file))
+                    if features is not None:
+                        X.append(features)
                         y.append(label)
     return X, y
 
@@ -114,9 +98,9 @@ def load_crema():
         if file.endswith('.wav'):
             label = parse_crema_filename(file)
             if label:
-                mfcc = extract_audio_features(os.path.join(CREMA_PATH, file))
-                if mfcc is not None:
-                    X.append(mfcc)
+                features = extract_audio_features(os.path.join(CREMA_PATH, file))
+                if features is not None:
+                    X.append(features)
                     y.append(label)
     return X, y
 
@@ -124,22 +108,22 @@ def load_deam():
     X, y = [], []
     for file in os.listdir(DEAM_PATH):
         if file.endswith('.mp3'):
-            mfcc = extract_audio_features(os.path.join(DEAM_PATH, file))
-            if mfcc is not None:
-                X.append(mfcc)
+            features = extract_audio_features(os.path.join(DEAM_PATH, file))
+            if features is not None:
+                X.append(features)
                 y.append('unknown')  # Placeholder
     return X, y
 
 def load_all_datasets():
     print("Loading RAVDESS Speech...")
     X_ravdess_speech, y_ravdess_speech = load_ravdess(RAVDESS_SPEECH_PATH)
-    
+
     print("Loading RAVDESS Song...")
     X_ravdess_song, y_ravdess_song = load_ravdess(RAVDESS_SONG_PATH)
-    
+
     print("Loading CREMA-D...")
     X_crema, y_crema = load_crema()
-    
+
     print("Loading DEAM...")
     X_deam, y_deam = load_deam()
 
