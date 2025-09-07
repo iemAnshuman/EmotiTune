@@ -6,6 +6,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
+import os # Import the os module
 
 from src.audio.load_features import load_features
 
@@ -48,6 +49,12 @@ class CNNEmotionClassifier(nn.Module):
         return x
 
 def main():
+    # --- NEW: Define paths for saving the model ---
+    MODELS_DIR = 'models'
+    MODEL_SAVE_PATH = os.path.join(MODELS_DIR, 'emotitune_cnn.pth')
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    # ---------------------------------------------
+
     X, y = load_features()
 
     le = LabelEncoder()
@@ -68,17 +75,15 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Get the input shape from the data
     input_shape = (1, X_train.shape[1], X_train.shape[2])
     model = CNNEmotionClassifier(num_classes=len(np.unique(y_encoded)), input_shape=input_shape).to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    # Setup TensorBoard writer
-    writer = SummaryWriter('runs/emotitune_cnn_dropout') # Changed log directory
+    writer = SummaryWriter('runs/emotitune_cnn_dropout')
 
-    num_epochs = 30
+    num_epochs = 30 # Increased epochs
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
@@ -97,7 +102,6 @@ def main():
         avg_train_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_train_loss:.4f}")
 
-        # Validation
         model.eval()
         correct, total = 0, 0
         with torch.no_grad():
@@ -110,11 +114,15 @@ def main():
         val_accuracy = 100 * correct / total
         print(f"Validation Accuracy: {val_accuracy:.2f}%")
 
-        # Log to TensorBoard
         writer.add_scalar('Loss/train', avg_train_loss, epoch)
         writer.add_scalar('Accuracy/val', val_accuracy, epoch)
 
     writer.close()
+
+    # --- NEW: Save the trained model ---
+    torch.save(model.state_dict(), MODEL_SAVE_PATH)
+    print(f"Model saved to {MODEL_SAVE_PATH}")
+    # -----------------------------------
 
 if __name__ == "__main__":
     main()
