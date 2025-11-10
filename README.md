@@ -7,6 +7,7 @@ A deep learning pipeline that detects human emotions from audio recordings. It u
 * **CNN Architecture:** Custom 2D CNN optimized for stacked audio feature maps.
 * **Professional Workflow:** Includes logging, unit tests, and YAML-based configuration.
 * **Inference Ready:** Simple command-line script to predict emotions on new audio files.
+* **Automated Pipeline:** Complete end-to-end execution with report generation via `run.py`.
 
 ## 🛠️ Setup
 1.  Install dependencies:
@@ -17,7 +18,7 @@ A deep learning pipeline that detects human emotions from audio recordings. It u
 
 ## 🏃‍♂️ Usage
 
-### 1. Data Processing
-Extract features from raw audio datasets (RAVDESS, CREMA-D, etc.):
+### Automated Pipeline (Recommended)
+Run the entire process (processing, training, reporting) with a single command:
 ```bash
-python src/audio/save_features.py
+python run.py
