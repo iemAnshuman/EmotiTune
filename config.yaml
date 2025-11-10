@@ -1,21 +1,17 @@
 data:
   raw:
-    # Updated to new default location in Google Drive
-    ravdess_speech: '../drive/MyDrive/data/ravdess/speech/'
-    ravdess_song: '../drive/MyDrive/data/ravdess/song/'
-    crema_d: '../drive/MyDrive/data/crema-d/'
-    deam: '../drive/MyDrive/data/deam/audio/'
-  processed: 'data/processed/'
-
+    ravdess_speech: data/ravdess/speech/
+    ravdess_song: data/ravdess/song/
+    crema_d: data/crema-d/
+    deam: ../drive/MyDrive/data/deam/audio/
+  processed: data/processed/
 audio:
   n_mfcc: 40
   max_pad_len: 174
   sampling_rate: 22050
-
 model:
-  name: 'emotitune_cnn.pth'
-  dir: 'models/'
-
+  name: emotitune_cnn.pth
+  dir: models/
 training:
   batch_size: 32
   learning_rate: 0.001
