@@ -35,7 +35,7 @@ def setup_data_paths():
     
     use_defaults = input("\nKeep these paths? (y/n): ").lower().strip()
     if use_defaults == 'y' or use_defaults == '':
-        print("✅ Using default paths.")
+        print("✅ Using paths from config.yaml")
         return
 
     print("\nENTER NEW PATHS (leave blank to keep current):")
@@ -49,25 +49,23 @@ def setup_data_paths():
         new_path = input(f"{pretty_name} [{current}]: ").strip()
         
         if new_path:
-            if os.path.exists(new_path):
-                 config['data']['raw'][key] = new_path
-            else:
-                print(f"⚠️ WARNING: Path not found: {new_path}")
-                retry = input("Use it anyway? (y/n): ").lower().strip()
-                if retry == 'y':
-                     config['data']['raw'][key] = new_path
-                else:
-                    print(f"Keeping old path for {pretty_name}")
+             config['data']['raw'][key] = new_path
 
-    # Save updated config
     with open(config_path, 'w') as f:
         yaml.dump(config, f, sort_keys=False)
-    print("\n✅ config.yaml updated with new paths.")
+    print("\n✅ config.yaml updated.")
 
 def run_command(command, step_name):
     print(f"\n{'='*50}\n🚀 STARTING: {step_name}\n{'='*50}\n")
+    
+    # --- FIX FOR ModuleNotFoundError ---
+    # Add the current directory to PYTHONPATH so subprocesses can find 'src'
+    env = os.environ.copy()
+    env['PYTHONPATH'] = os.getcwd() + os.pathsep + env.get('PYTHONPATH', '')
+    
     try:
-        subprocess.run(command, check=True, shell=True)
+        # Pass the modified environment to the subprocess
+        subprocess.run(command, check=True, shell=True, env=env)
         print(f"\n✅ COMPLETED: {step_name}")
     except subprocess.CalledProcessError as e:
         print(f"\n❌ FAILED: {step_name}\nError: {e}")
@@ -111,7 +109,10 @@ def main():
     py = sys.executable
     run_command(f"{py} src/audio/preprocess.py", "Feature Extraction")
     run_command(f"{py} src/audio/cnn_baseline.py", "Model Training")
-    run_command("docker build -t emotitune-api .", "Docker Build")
+
+    # Only try docker if specifically requested or standard environment, 
+    # as Colab often struggles with standard Docker commands.
+    # run_command("docker build -t emotitune-api .", "Docker Build") 
 
     generate_report(gpu_active)
     print("\n🎉 PIPELINE FINISHED!")
