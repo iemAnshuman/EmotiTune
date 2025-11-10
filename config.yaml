@@ -1,10 +1,11 @@
 data:
   raw:
-    ravdess_speech: data/ravdess/speech/
-    ravdess_song: data/ravdess/song/
-    crema_d: data/crema-d/
-    deam: ../drive/MyDrive/data/deam/audio/
-  processed: data/processed/
+    # Updated to new default location in Google Drive
+    ravdess_speech: '../drive/MyDrive/data/ravdess/speech/'
+    ravdess_song: '../drive/MyDrive/data/ravdess/song/'
+    crema_d: '../drive/MyDrive/data/crema-d/'
+    deam: '../drive/MyDrive/data/deam/audio/'
+  processed: 'data/processed/'
 audio:
   n_mfcc: 40
   max_pad_len: 174
