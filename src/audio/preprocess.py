@@ -2,17 +2,22 @@ import os
 import yaml
 import librosa
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
 from librosa.feature import chroma_stft, spectral_contrast, tonnetz, mfcc
 from librosa.effects import harmonic
 
-# Import our new logger
 from src.utils import setup_logger
 
 # --- CONFIG & LOGGER SETUP ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-with open(os.path.join(PROJECT_ROOT, 'config.yaml'), 'r') as f:
+CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config.yaml')
+
+# Load config once at module level for worker processes
+with open(CONFIG_PATH, 'r') as f:
     CONFIG = yaml.safe_load(f)
 
+# Logger needs to be pickleable for multiprocessing, so we set it up inside functions or use a simple one here
 logger = setup_logger('preprocess', log_file='logs/data_processing.log')
 
 # Define emotion mappings
@@ -34,12 +39,15 @@ def _pad_or_trim(feature, max_pad_len=CONFIG['audio']['max_pad_len']):
         return feature[:, :max_pad_len]
 
 def extract_audio_features(file_path):
+    """
+    Worker function that must be self-contained for pickling in multiprocessing.
+    """
     try:
+        # Re-load config inside worker if necessary, but module-level usually works on Linux/macOS.
+        # For strict Windows compatibility, you might need to pass parameters explicitly.
         y, sr = librosa.load(file_path, sr=CONFIG['audio']['sampling_rate'], res_type='kaiser_fast')
         
-        # If audio is too short, it might cause issues with some features
-        if len(y) < sr * 0.1: # less than 0.1 seconds
-             logger.warning(f"Audio file too short, skipping: {file_path}")
+        if len(y) < sr * 0.1:
              return None
 
         mfcc_feat = mfcc(y=y, sr=sr, n_mfcc=CONFIG['audio']['n_mfcc'])
@@ -54,7 +62,8 @@ def extract_audio_features(file_path):
 
         return np.vstack([mfcc_feat, chroma_feat, contrast_feat, tonnetz_feat])
     except Exception as e:
-        logger.error(f"Error processing {file_path}: {e}")
+        # Avoid complex logging in workers to prevent deadlocks
+        print(f"Error processing {file_path}: {e}")
         return None
 
 def parse_ravdess_filename(filename):
@@ -67,53 +76,62 @@ def parse_crema_filename(filename):
     if len(parts) < 3: return None
     return CREMA_EMOTIONS.get(parts[2])
 
-def load_ravdess(path, dataset_name="RAVDESS"):
-    X, y = [], []
+def process_file(file_path, dataset_type):
+    """Helper to process a single file and return its features and label."""
+    filename = os.path.basename(file_path)
+    label = None
+    if dataset_type == 'ravdess':
+        label = parse_ravdess_filename(filename)
+    elif dataset_type == 'crema':
+        label = parse_crema_filename(filename)
+    
+    if label:
+        features = extract_audio_features(file_path)
+        if features is not None:
+            return features, label
+    return None
+
+def load_dataset_concurrent(path, dataset_type, max_workers=None):
+    """Loads a dataset using parallel processing."""
     full_path = os.path.join(PROJECT_ROOT, path)
     if not os.path.exists(full_path):
-        logger.warning(f"{dataset_name} path not found: {full_path}")
+        logger.warning(f"Path not found: {full_path}")
         return [], []
 
-    logger.info(f"Loading {dataset_name} from {full_path}")
+    file_paths = []
     for root, _, files in os.walk(full_path):
         for file in files:
             if file.endswith('.wav'):
-                label = parse_ravdess_filename(file)
-                if label:
-                    features = extract_audio_features(os.path.join(root, file))
-                    if features is not None:
-                        X.append(features)
-                        y.append(label)
-    logger.info(f"Loaded {len(X)} samples from {dataset_name}")
-    return X, y
+                file_paths.append(os.path.join(root, file))
 
-def load_crema():
+    logger.info(f"Found {len(file_paths)} files in {dataset_type}. Starting parallel processing...")
+    
     X, y = [], []
-    full_path = os.path.join(PROJECT_ROOT, CONFIG['data']['raw']['crema_d'])
-    if not os.path.exists(full_path):
-        logger.warning(f"CREMA-D path not found: {full_path}")
-        return [], []
+    # Use ProcessPoolExecutor for CPU-bound tasks
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_file = {executor.submit(process_file, fp, dataset_type): fp for fp in file_paths}
+        
+        # Process results as they complete with a progress bar
+        for future in tqdm(as_completed(future_to_file), total=len(file_paths), desc=f"Loading {dataset_type}", leave=False):
+            result = future.result()
+            if result:
+                features, label = result
+                X.append(features)
+                y.append(label)
 
-    logger.info(f"Loading CREMA-D from {full_path}")
-    for file in os.listdir(full_path):
-        if file.endswith('.wav'):
-            label = parse_crema_filename(file)
-            if label:
-                features = extract_audio_features(os.path.join(full_path, file))
-                if features is not None:
-                    X.append(features)
-                    y.append(label)
-    logger.info(f"Loaded {len(X)} samples from CREMA-D")
     return X, y
 
 def load_all_datasets():
-    logger.info("Starting dataset loading process...")
-    X_rav, y_rav = load_ravdess(CONFIG['data']['raw']['ravdess_speech'], "RAVDESS Speech")
-    X_song, y_song = load_ravdess(CONFIG['data']['raw']['ravdess_song'], "RAVDESS Song")
-    X_crema, y_crema = load_crema()
+    logger.info("Starting concurrent dataset loading...")
+    
+    # We can load datasets sequentially, but each dataset uses internal parallelism
+    X_rav_speech, y_rav_speech = load_dataset_concurrent(CONFIG['data']['raw']['ravdess_speech'], 'ravdess')
+    X_rav_song, y_rav_song = load_dataset_concurrent(CONFIG['data']['raw']['ravdess_song'], 'ravdess')
+    X_crema, y_crema = load_dataset_concurrent(CONFIG['data']['raw']['crema_d'], 'crema')
 
-    X = X_rav + X_song + X_crema
-    y = y_rav + y_song + y_crema
+    X = X_rav_speech + X_rav_song + X_crema
+    y = y_rav_speech + y_rav_song + y_crema
 
     if len(X) == 0:
         logger.critical("No data loaded! Check your paths in config.yaml")
@@ -123,4 +141,5 @@ def load_all_datasets():
     return np.array(X), np.array(y)
 
 if __name__ == "__main__":
+    # This guard is crucial for multiprocessing on some platforms
     load_all_datasets()

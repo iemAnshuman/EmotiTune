@@ -3,6 +3,7 @@ torch
 torchaudio
 transformers
 librosa
+resampy
 scikit-learn
 numpy
 pandas
