@@ -1,0 +1,29 @@
+# config.yaml
+
+data:
+  raw:
+    ravdess_speech: 'data/ravdess/speech/'
+    ravdess_song: 'data/ravdess/song/'
+    crema_d: 'data/crema-d/'
+    deam: 'data/deam/audio/'
+  processed: 'data/processed/'
+
+audio:
+  # Mel-frequency cepstral coefficients (timbre)
+  n_mfcc: 40
+  # Standardized length for all audio feature inputs (time frames)
+  max_pad_len: 174
+  # Standard sample rate for librosa
+  sampling_rate: 22050
+
+model:
+  name: 'emotitune_cnn.pth'
+  dir: 'models/'
+
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  num_epochs: 30
+  # Percentage of data to keep for validation
+  val_split: 0.2
+  seed: 42
