@@ -8,13 +8,17 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
 import yaml
+from tqdm import tqdm # For a nice progress bar
 
 from src.audio.load_features import load_features
+from src.utils import setup_logger
 
-# --- CONFIG SETUP ---
+# --- CONFIG & LOGGER ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 with open(os.path.join(PROJECT_ROOT, 'config.yaml'), 'r') as f:
     CONFIG = yaml.safe_load(f)
+
+logger = setup_logger('training', log_file='logs/training.log')
 
 class CNNEmotionClassifier(nn.Module):
     def __init__(self, num_classes, input_shape):
@@ -49,51 +53,57 @@ class CNNEmotionClassifier(nn.Module):
         return x
 
 def main():
-    # Setup paths from config
+    logger.info("Starting training pipeline...")
     MODELS_DIR = os.path.join(PROJECT_ROOT, CONFIG['model']['dir'])
     MODEL_SAVE_PATH = os.path.join(MODELS_DIR, CONFIG['model']['name'])
     os.makedirs(MODELS_DIR, exist_ok=True)
 
-    # Load Data
-    X, y = load_features()
+    try:
+        X, y = load_features()
+    except FileNotFoundError:
+        logger.critical("Processed data not found! Run src/audio/save_features.py first.")
+        return
+
     le = LabelEncoder()
     y_encoded = le.fit_transform(y)
+    logger.info(f"Classes found: {le.classes_}")
 
-    # Split using config seed and size
     X_train, X_val, y_train, y_val = train_test_split(
         X, y_encoded, 
         test_size=CONFIG['training']['val_split'], 
-        random_state=CONFIG['training']['seed']
+        random_state=CONFIG['training']['seed'],
+        stratify=y_encoded # Ensure balanced split of emotions
     )
 
-    # Convert to tensors
     X_train_tensor = torch.tensor(X_train).unsqueeze(1).float()
     X_val_tensor = torch.tensor(X_val).unsqueeze(1).float()
     y_train_tensor = torch.tensor(y_train).long()
     y_val_tensor = torch.tensor(y_val).long()
 
-    # Create dataloaders with config batch size
+    logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
+
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['training']['batch_size'], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=CONFIG['training']['batch_size'])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Training on: {device}")
+    logger.info(f"Using device: {device}")
 
     input_shape = (1, X_train.shape[1], X_train.shape[2])
-    model = CNNEmotionClassifier(len(np.unique(y_encoded)), input_shape).to(device)
+    model = CNNEmotionClassifier(len(le.classes_), input_shape).to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=CONFIG['training']['learning_rate'])
-    writer = SummaryWriter('runs/emotitune_cnn_v1')
+    writer = SummaryWriter('runs/emotitune_cnn_v2')
 
-    # Training loop using config epochs
     num_epochs = CONFIG['training']['num_epochs']
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-        for inputs, labels in train_loader:
+        # Use tqdm for a visual progress bar in the terminal
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
+        for inputs, labels in progress_bar:
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -101,10 +111,10 @@ def main():
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
+            progress_bar.set_postfix(loss=loss.item())
 
         avg_train_loss = running_loss / len(train_loader)
         
-        # Validation
         model.eval()
         correct, total = 0, 0
         with torch.no_grad():
@@ -116,14 +126,16 @@ def main():
                 correct += (predicted == labels).sum().item()
         
         val_accuracy = 100 * correct / total
-        print(f"Epoch [{epoch+1}/{num_epochs}] - Loss: {avg_train_loss:.4f} - Val Acc: {val_accuracy:.2f}%")
+        logger.info(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f} - Val Acc: {val_accuracy:.2f}%")
         
         writer.add_scalar('Loss/train', avg_train_loss, epoch)
         writer.add_scalar('Accuracy/val', val_accuracy, epoch)
 
     writer.close()
     torch.save(model.state_dict(), MODEL_SAVE_PATH)
-    print(f"Model saved to {MODEL_SAVE_PATH}")
+    # Also save the label encoder so we know which class ID maps to which emotion later
+    np.save(os.path.join(MODELS_DIR, 'classes.npy'), le.classes_)
+    logger.info(f"Model saved to {MODEL_SAVE_PATH}")
 
 if __name__ == "__main__":
     main()
